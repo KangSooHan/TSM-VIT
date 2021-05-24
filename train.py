@@ -10,7 +10,7 @@ import torch
 
 #from hparams import Hparams
 #from utils import *
-#from data_load import get_batch
+from data_load import return_dataset
 #from model import *
 
 
@@ -22,14 +22,8 @@ def main(){
     parser = hparams.parser
     hp = parser.parse_args()
 
-    model = VIT()
-
-    crop_size = model.crop_size
-    scale_size = model.scale_size
-    
-
-
-
+    logging.info("# Prepare Dataset")
+    num_class, 
 
 if __name__ == '__main__':
     main()
