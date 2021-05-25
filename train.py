@@ -15,6 +15,7 @@ from data_load import return_dataset
 
 
 def main(){
+    global hp
     logging.basicConfig(level = logging.INFO)
 
     logging.info("# Hparams")
@@ -23,7 +24,11 @@ def main(){
     hp = parser.parse_args()
 
     logging.info("# Prepare Dataset")
-    num_class, 
+    num_class, hp.train_list, hp.val_list, hp.root_path, prefix = dataset_config.return_dataset(hp.dataset, hp.modality)
+
+    save_dir = hp.save_dir
+
+    model = VisionTransformer(hp)
 
 if __name__ == '__main__':
     main()
