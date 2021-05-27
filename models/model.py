@@ -13,6 +13,9 @@ import torch
 import torch.nn as nn
 import numpy as np
 
+import torchvision
+from ops.transforms import *
+
 from torch.nn import CrossEntropyLoss, Dropout, Softmax, Linear, Conv2d, LayerNorm
 from torch.nn.modules.utils import _pair
 from scipy import ndimage
@@ -253,25 +256,34 @@ class Transformer(nn.Module):
 
 
 class VisionTransformer(nn.Module):
-    def __init__(self, config, img_size=224, num_classes=21843, zero_head=False, vis=False):
+    def __init__(self, config, img_size=224, num_classes=21843, modality="RGB", zero_head=False, vis=False, num_segments=8):
         super(VisionTransformer, self).__init__()
         self.num_classes = num_classes
+        self.modality = modality
         self.zero_head = zero_head
         self.classifier = config.classifier
+        self.img_size = img_size
+        self.num_segments = num_segments
 
         self.transformer = Transformer(config, img_size, vis)
         self.head = Linear(config.hidden_size, num_classes)
+        self.new_fc = Linear(config.hidden_size, num_classes)
 
     def forward(self, x, labels=None):
+        x = x.view((-1, 3) + x.size()[-2:])
         x, attn_weights = self.transformer(x)
-        logits = self.head(x[:, 0])
+        logits = self.new_fc(x[:, 0])
+        logits = logits.view((-1, self.num_segments, logits.size()[-1]))[:,-1]
 
-        if labels is not None:
-            loss_fct = CrossEntropyLoss()
-            loss = loss_fct(logits.view(-1, self.num_classes), labels.view(-1))
-            return loss
-        else:
-            return logits, attn_weights
+        return logits, attn_weights
+
+    @property
+    def scale_size(self):
+        return self.img_size * 256 // 224
+
+    @property
+    def crop_size(self):
+        return self.img_size 
 
     def load_from(self, weights):
         with torch.no_grad():
@@ -327,6 +339,85 @@ class VisionTransformer(nn.Module):
                 for bname, block in self.transformer.embeddings.hybrid_model.body.named_children():
                     for uname, unit in block.named_children():
                         unit.load_from(weights, n_block=bname, n_unit=uname)
+
+
+    def get_augmentation(self, flip=True):
+        if self.modality == 'RGB':
+            if flip:
+                return torchvision.transforms.Compose([GroupMultiScaleCrop(self.img_size, [1, .875, .75, .66]),
+                                                       GroupRandomHorizontalFlip(is_flow=False)])
+            else:
+                print('#' * 20, 'NO FLIP!!!')
+                return torchvision.transforms.Compose([GroupMultiScaleCrop(self.img_size, [1, .875, .75, .66])])
+        elif self.modality == 'Flow':
+            return torchvision.transforms.Compose([GroupMultiScaleCrop(self.img_size, [1, .875, .75]),
+                                                   GroupRandomHorizontalFlip(is_flow=True)])
+        elif self.modality == 'RGBDiff':
+            return torchvision.transforms.Compose([GroupMultiScaleCrop(self.img_size, [1, .875, .75]),
+                                                   GroupRandomHorizontalFlip(is_flow=False)])
+
+
+    def get_optim_policies(self):
+        conv_weight = []
+        conv_bias = []
+        normal_weight = []
+        normal_bias = []
+        lr5_weight = []
+        lr10_bias = []
+        bn = []
+        ln = []
+        custom_ops = []
+
+        bn_cnt = 0
+        for m in self.modules():
+            if isinstance(m, torch.nn.Conv2d):
+                ps = list(m.parameters())
+                conv_weight.append(ps[0])
+                if len(ps) == 2:
+                    conv_bias.append(ps[1])
+
+            elif isinstance(m, torch.nn.Linear):
+                ps = list(m.parameters())
+                normal_weight.append(ps[0])
+                if len(ps) == 2:
+                    normal_bias.append(ps[1])
+
+            elif isinstance(m, torch.nn.BatchNorm2d):
+                bn_cnt += 1
+                # later BN's are frozen
+                #if not self._enable_pbn or bn_cnt == 1:
+                bn.extend(list(m.parameters()))
+
+            elif isinstance(m, torch.nn.LayerNorm):
+                # later BN's are frozen
+                ln.extend(list(m.parameters()))
+
+            elif len(m._modules) == 0:
+                if len(list(m.parameters())) > 0:
+                    raise ValueError("New atomic module type: {}. Need to give it a learning policy".format(type(m)))
+
+        return [
+            {'params': conv_weight, 'lr_mult': 1 , 'decay_mult': 1,
+             'name': "first_conv_weight"},
+            {'params': conv_bias, 'lr_mult': 2 , 'decay_mult': 0,
+             'name': "first_conv_bias"},
+            {'params': normal_weight, 'lr_mult': 1, 'decay_mult': 1,
+             'name': "normal_weight"},
+            {'params': normal_bias, 'lr_mult': 2, 'decay_mult': 0,
+             'name': "normal_bias"},
+            {'params': bn, 'lr_mult': 1, 'decay_mult': 0,
+             'name': "BN scale/shift"},
+            {'params': ln, 'lr_mult': 1, 'decay_mult': 0,
+             'name': "LN scale/shift"},
+            {'params': custom_ops, 'lr_mult': 1, 'decay_mult': 1,
+             'name': "custom_ops"},
+            # for fc
+            {'params': lr5_weight, 'lr_mult': 5, 'decay_mult': 1,
+             'name': "lr5_weight"},
+            {'params': lr10_bias, 'lr_mult': 10, 'decay_mult': 0,
+             'name': "lr10_bias"},
+        ]
+
 
 
 CONFIGS = {
