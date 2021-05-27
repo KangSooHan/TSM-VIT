@@ -268,6 +268,7 @@ class VisionTransformer(nn.Module):
         self.transformer = Transformer(config, img_size, vis)
         self.head = Linear(config.hidden_size, num_classes)
         self.new_fc = Linear(config.hidden_size, num_classes)
+        
 
     def forward(self, x, labels=None):
         x = x.view((-1, 3) + x.size()[-2:])

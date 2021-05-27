@@ -14,6 +14,7 @@ from utils import *
 from ops.data_load import return_dataset
 from ops.dataset import DataSet
 from ops.transforms import *
+from ops.temporal_shift import make_temporal_shift
 #from model import *
 
 from models.model import VisionTransformer, CONFIGS
@@ -38,24 +39,28 @@ def main():
     config = CONFIGS[hp.model_type]
 
     model = VisionTransformer(config, hp.img_size, zero_head=True, num_classes=101, modality=hp.modality, num_segments=hp.num_segments)
+
     scale_size = model.scale_size
     crop_size = model.crop_size
     policies = model.get_optim_policies()
     train_augmentation = model.get_augmentation()
     model.load_from(np.load(os.path.join(hp.pretrained_dir, hp.model_type+'.npz')))
-    model = torch.nn.DataParallel(model).cuda()
 
+
+    from ops.temporal_shift import make_temporal_shift
+    make_temporal_shift(model, hp.num_segments)
+
+    num_params = count_parameters(model)
+    logging.info("{}".format(config))
+    logging.info("Training Parameters %s", hp)
+    logging.info("Total Parameters: \t%2.1fM" % num_params)
+    model = torch.nn.DataParallel(model).cuda()
 
     optimizer = torch.optim.SGD(policies,
                         hp.lr,
                         momentum=hp.momentum,
                         weight_decay=hp.weight_decay)
 
-    num_params = count_parameters(model)
-
-    logging.info("{}".format(config))
-    logging.info("Training Parameters %s", hp)
-    logging.info("Total Parameters: \t%2.1fM" % num_params)
 
     # Data loading code
     if hp.modality != 'RGBDiff':
@@ -260,8 +265,6 @@ def validate(val_loader, model, criterion, epoch, tf_writer=None):
         tf_writer.add_scalar('acc/test_top5', top5.avg, epoch)
 
     return top1.avg
-
-
 
 
 
