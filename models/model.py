@@ -250,7 +250,8 @@ class Transformer(nn.Module):
         self.encoder = Encoder(config, vis)
 
     def forward(self, input_ids):
-        embedding_output = self.embeddings(input_ids)
+        with torch.no_grad():
+            embedding_output = self.embeddings(input_ids)
         encoded, attn_weights = self.encoder(embedding_output)
         return encoded, attn_weights
 
@@ -268,7 +269,7 @@ class VisionTransformer(nn.Module):
         self.transformer = Transformer(config, img_size, vis)
         self.head = Linear(config.hidden_size, num_classes)
         self.new_fc = Linear(config.hidden_size, num_classes)
-        
+
 
     def forward(self, x, labels=None):
         x = x.view((-1, 3) + x.size()[-2:])
@@ -356,7 +357,6 @@ class VisionTransformer(nn.Module):
         elif self.modality == 'RGBDiff':
             return torchvision.transforms.Compose([GroupMultiScaleCrop(self.img_size, [1, .875, .75]),
                                                    GroupRandomHorizontalFlip(is_flow=False)])
-
 
     def get_optim_policies(self):
         conv_weight = []

@@ -9,22 +9,24 @@ import torch.nn.functional as F
 
 
 class TemporalShift(nn.Module):
-    def __init__(self, net, n_segment=6, n_div=8, inplace=False):
+    def __init__(self, net, n_segment=6, n_div=8, dim=256, inplace=False):
         super(TemporalShift, self).__init__()
         self.net = net
         self.n_segment = n_segment
         self.fold_div = n_div
         self.inplace = inplace
+        self.w1 = torch.nn.Parameter(torch.rand(1, 1,1, dim)*2-1)
         if inplace:
             print('=> Using in-place shift...')
         print('=> Using fold div: {}'.format(self.fold_div))
 
     def forward(self, x):
-        x = self.shift(x, self.n_segment, fold_div=self.fold_div, inplace=self.inplace)
+        x = self.shift(x, self.n_segment, fold_div=self.fold_div, inplace=self.inplace, weight=self.w1)
         return self.net(x)
 
     @staticmethod
-    def shift(x, n_segment, fold_div=3, inplace=False):
+    def shift(x, n_segment, fold_div=3, inplace=False, weight=None):
+        w1 = weight
         nt, c, hw = x.size()
         n_batch = nt // n_segment
         x = x.view(n_batch, n_segment, c, hw)
@@ -33,13 +35,11 @@ class TemporalShift(nn.Module):
         if inplace:
             # Due to some out of order error when performing parallel computing. 
             # May need to write a CUDA kernel.
-            raise NotImplementedError  
+            raise NotImplementedError
             # out = InplaceShift.apply(x, fold)
         else:
-            out = torch.zeros_like(x)
-            out[:, :-1, :, :fold] = x[:, 1:, :,:fold]  # shift left
-            out[:, 1:, :, fold: 2 * fold] = x[:, :-1,:, fold: 2 * fold]  # shift right
-            out[:, :, :, 2 * fold:] = x[:, :, :, 2 * fold:]  # not shift
+            out = torch.clone(x)
+            out[:, :-1, :] += x[:, 1:, :] * w1
 
         return out.view(nt, c, hw)
 
@@ -99,12 +99,13 @@ def make_temporal_shift(net, n_segment, n_div=8):
 
     print(list(net.transformer.encoder.layer.children()))
     def make_block_temporal(stage):
-        print(stage)
-        stage.ffn.fc2 = TemporalShift(stage.ffn.fc2)
+        stage = TemporalShift(stage, dim=stage.in_features)
         return stage
 
-    for layer in list(net.transformer.encoder.layer.children()):
-        layer = make_block_temporal(layer)
+    for i, layer in enumerate(list(net.transformer.encoder.layer.children())):
+        if i==0:
+            print(layer)
+            layer.ffn.fc2 = make_block_temporal(layer.ffn.fc2)
 
 if __name__ == '__main__':
     # test inplace shift v.s. vanilla shift
