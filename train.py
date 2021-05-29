@@ -40,6 +40,8 @@ def main():
 
     model = VisionTransformer(config, hp.img_size, zero_head=True, num_classes=101, modality=hp.modality, num_segments=hp.num_segments)
 
+    emb = model.transformer.embeddings
+
     scale_size = model.scale_size
     crop_size = model.crop_size
     policies = model.get_optim_policies()
@@ -77,7 +79,7 @@ def main():
         data_length = 5
 
     train_loader = torch.utils.data.DataLoader(
-        DataSet(hp.root_path, hp.train_list, num_segments=hp.num_segments,
+        DataSet(hp.root_path, hp.train_list, num_segments=hp.num_frames,
                    new_length=data_length,
                    modality=hp.modality,
                    image_tmpl=prefix,
@@ -92,7 +94,7 @@ def main():
         drop_last=True)  # prevent something not % n_GPU
 
     val_loader = torch.utils.data.DataLoader(
-        DataSet(hp.root_path, hp.val_list, num_segments=hp.num_segments,
+        DataSet(hp.root_path, hp.val_list, num_segments=hp.num_frames,
                    new_length=data_length,
                    modality=hp.modality,
                    image_tmpl=prefix,
@@ -125,7 +127,7 @@ def main():
         adjust_learning_rate(optimizer, epoch, hp.lr_type, hp.lr_steps)
 
         # train for one epoch
-        train(train_loader, model, criterion, optimizer, epoch, tf_writer)
+        train(train_loader, model, emb, criterion, optimizer, epoch, tf_writer)
 
         # evaluate on validation set
         if (epoch + 1) % hp.eval_freq == 0 or epoch == hp.epochs - 1:
@@ -156,14 +158,23 @@ def adjust_learning_rate(optimizer, epoch, lr_type, lr_steps):
         param_group['weight_decay'] = decay * param_group['decay_mult']
 
 
+def batched_index_select(input, dim, index):
+    for ii in range(1, len(input.shape)):
+        if ii != dim:
+            index = index.unsqueeze(ii)
+    expanse = list(input.shape)
+    expanse[0] = -1
+    expanse[dim] = -1
+    index = index.expand(expanse)
+    return torch.gather(input, dim, index)
 
-
-def train(train_loader, model, criterion, optimizer, epoch, tf_writer):
+def train(train_loader, model, emb, criterion, optimizer, epoch, tf_writer):
     batch_time = AverageMeter()
     data_time = AverageMeter()
     losses = AverageMeter()
     top1 = AverageMeter()
     top5 = AverageMeter()
+
 
     # switch to train mode
     model.train()
@@ -177,6 +188,17 @@ def train(train_loader, model, criterion, optimizer, epoch, tf_writer):
         input_var = torch.autograd.Variable(input)
         target_var = torch.autograd.Variable(target)
 
+#        img_emb = emb(input_var.view((-1, 3) + input_var.size()[-2:]).cuda())
+#        nt, c, h = img_emb.size()
+#        img_emb = img_emb.view(-1, hp.num_frames, c*h)
+#        sim = torch.zeros(img_emb.size()[:2])
+#        for t in range(hp.num_frames-1):
+#            sim[:,t] = torch.nn.CosineSimilarity()(img_emb[:,t], img_emb[:, t+1])
+#
+#        idx,_ = torch.sort(torch.topk(sim, hp.num_segments, 1).indices)
+#        input_var = input_var.view((-1, hp.num_frames, 3) + input_var.size()[-2:])
+#        inputs = batched_index_select(input_var, 1, idx).view((-1, hp.num_segments*3)+input_var.size()[-2:])
+#
         # compute output
         output, _ = model(input_var)
         loss = criterion(output, target_var)

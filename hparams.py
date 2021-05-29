@@ -21,8 +21,9 @@ class Hparams:
     parser.add_argument('--lr', type=int, default=0.001, help="Learning Rate")
     parser.add_argument('--momentum', type=int, default=0.9, help="Momentum")
     parser.add_argument('--weight-decay', '-wd', type=float, default=5e-4, help='weight decay')
-    
+
     parser.add_argument('--num_segments', type=int, default=6, help='number of segment')
+    parser.add_argument('--num_frames', type=int, default=6, help='number of segment')
 
     parser.add_argument('--save_dir', default="test", help="save directory")
     parser.add_argument('--pretrained_dir', default="pretrained", help="save directory")
