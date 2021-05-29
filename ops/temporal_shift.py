@@ -21,8 +21,9 @@ class TemporalShift(nn.Module):
         print('=> Using fold div: {}'.format(self.fold_div))
 
     def forward(self, x):
+        x = self.net(x)
         x = self.shift(x, self.n_segment, fold_div=self.fold_div, inplace=self.inplace, weight=self.w1)
-        return self.net(x)
+        return x
 
     @staticmethod
     def shift(x, n_segment, fold_div=3, inplace=False, weight=None):
@@ -41,7 +42,9 @@ class TemporalShift(nn.Module):
             out = torch.clone(x)
             out[:, :-1, :] += x[:, 1:, :] * w1
 
-        return out.view(nt, c, hw)
+            out = out[:,-1]
+
+        return out.view(n_batch, c, hw)
 
 
 class InplaceShift(torch.autograd.Function):
@@ -97,15 +100,11 @@ class TemporalPool(nn.Module):
 def make_temporal_shift(net, n_segment, n_div=8):
     import torchvision
 
-    print(list(net.transformer.encoder.layer.children()))
     def make_block_temporal(stage):
-        stage = TemporalShift(stage, dim=stage.in_features)
+        stage = TemporalShift(stage, dim=768)
         return stage
 
-    for i, layer in enumerate(list(net.transformer.encoder.layer.children())):
-        if i==0:
-            print(layer)
-            layer.ffn.fc2 = make_block_temporal(layer.ffn.fc2)
+    net.transformer.embeddings = make_block_temporal(net.transformer.embeddings)
 
 if __name__ == '__main__':
     # test inplace shift v.s. vanilla shift

@@ -200,7 +200,7 @@ def train(train_loader, model, emb, criterion, optimizer, epoch, tf_writer):
 #        inputs = batched_index_select(input_var, 1, idx).view((-1, hp.num_segments*3)+input_var.size()[-2:])
 #
         # compute output
-        output, _ = model(inputs)
+        output, _ = model(input_var)
         loss = criterion(output, target_var)
 
         # measure accuracy and record loss

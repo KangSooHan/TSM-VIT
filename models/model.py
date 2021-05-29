@@ -275,7 +275,6 @@ class VisionTransformer(nn.Module):
         x = x.view((-1, 3) + x.size()[-2:])
         x, attn_weights = self.transformer(x)
         logits = self.new_fc(x[:, 0])
-        logits = logits.view((-1, self.num_segments, logits.size()[-1]))[:,-1]
 
         return logits, attn_weights
 
