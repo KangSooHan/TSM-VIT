@@ -16,16 +16,14 @@ class TemporalShift(nn.Module):
         self.n_segment = n_segment
         self.fold_div = n_div
         self.inplace = inplace
-        self.w1 = torch.nn.Parameter(torch.rand(1, 1,1, dim)*2-1)
-        self.rnn = torch.nn.RNN(dim, dim, nonlinearity='relu')
+        self.w1 = torch.nn.Parameter(torch.rand(1, 1, dim)*2-1)
         if inplace:
             print('=> Using in-place shift...')
         print('=> Using fold div: {}'.format(self.fold_div))
 
     def forward(self, x):
-        x = self.net(x)
         x = self.shift(x, self.n_segment, fold_div=self.fold_div, inplace=self.inplace, weight=self.rnn)
-        return x
+        return self.net(x)
 
     @staticmethod
     def shift(x, n_segment, fold_div=3, inplace=False, weight=None):

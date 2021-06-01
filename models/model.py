@@ -250,8 +250,7 @@ class Transformer(nn.Module):
         self.encoder = Encoder(config, vis)
 
     def forward(self, input_ids):
-        with torch.no_grad():
-            embedding_output = self.embeddings(input_ids)
+        embedding_output = self.embeddings(input_ids)
         encoded, attn_weights = self.encoder(embedding_output)
         return encoded, attn_weights
 
@@ -269,12 +268,13 @@ class VisionTransformer(nn.Module):
         self.transformer = Transformer(config, img_size, vis)
         self.head = Linear(config.hidden_size, num_classes)
         self.new_fc = Linear(config.hidden_size, num_classes)
-
+        
 
     def forward(self, x, labels=None):
         x = x.view((-1, 3) + x.size()[-2:])
         x, attn_weights = self.transformer(x)
         logits = self.new_fc(x[:, 0])
+        logits = logits.view((-1, self.num_segments, logits.size()[-1]))[:,-1]
 
         return logits, attn_weights
 
@@ -357,6 +357,7 @@ class VisionTransformer(nn.Module):
             return torchvision.transforms.Compose([GroupMultiScaleCrop(self.img_size, [1, .875, .75]),
                                                    GroupRandomHorizontalFlip(is_flow=False)])
 
+
     def get_optim_policies(self):
         conv_weight = []
         conv_bias = []
@@ -367,7 +368,6 @@ class VisionTransformer(nn.Module):
         bn = []
         ln = []
         custom_ops = []
-        rnn_weight = []
 
         bn_cnt = 0
         for m in self.modules():
@@ -376,10 +376,6 @@ class VisionTransformer(nn.Module):
                 conv_weight.append(ps[0])
                 if len(ps) == 2:
                     conv_bias.append(ps[1])
-
-            elif isinstance(m, torch.nn.RNN):
-                ps = list(m.parameters())
-                rnn_weight.extend(list(m.parameters()))
 
             elif isinstance(m, torch.nn.Linear):
                 ps = list(m.parameters())
@@ -408,8 +404,6 @@ class VisionTransformer(nn.Module):
              'name': "first_conv_bias"},
             {'params': normal_weight, 'lr_mult': 1, 'decay_mult': 1,
              'name': "normal_weight"},
-            {'params': rnn_weight, 'lr_mult': 1, 'decay_mult': 1,
-             'name': "rnn_weight"},
             {'params': normal_bias, 'lr_mult': 2, 'decay_mult': 0,
              'name': "normal_bias"},
             {'params': bn, 'lr_mult': 1, 'decay_mult': 0,
