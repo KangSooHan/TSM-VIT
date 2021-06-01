@@ -6,45 +6,51 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from indrnn import *
 
 
 class TemporalShift(nn.Module):
-    def __init__(self, net, n_segment=6, n_div=8, dim=256, inplace=False):
+    def __init__(self, net, n_segment=16, n_div=8, dim=256, inplace=False):
         super(TemporalShift, self).__init__()
         self.net = net
         self.n_segment = n_segment
         self.fold_div = n_div
         self.inplace = inplace
         self.w1 = torch.nn.Parameter(torch.rand(1, 1,1, dim)*2-1)
+        self.rnn = torch.nn.RNN(dim, dim)
         if inplace:
             print('=> Using in-place shift...')
         print('=> Using fold div: {}'.format(self.fold_div))
 
     def forward(self, x):
         x = self.net(x)
-        x = self.shift(x, self.n_segment, fold_div=self.fold_div, inplace=self.inplace, weight=self.w1)
+        x = self.shift(x, self.n_segment, fold_div=self.fold_div, inplace=self.inplace, weight=self.rnn)
         return x
 
     @staticmethod
     def shift(x, n_segment, fold_div=3, inplace=False, weight=None):
-        w1 = weight
-        nt, c, hw = x.size()
+        rnn = weight
+        nt, p, c = x.size()
         n_batch = nt // n_segment
-        x = x.view(n_batch, n_segment, c, hw)
+        x = x.view(n_batch, n_segment, p, c)
+        x = x.permute(1, 0, 2, 3)
+        x = x.reshape(n_segment, -1, c)
 
-        fold = c // fold_div
+        fold = c // 16
         if inplace:
             # Due to some out of order error when performing parallel computing. 
             # May need to write a CUDA kernel.
             raise NotImplementedError
             # out = InplaceShift.apply(x, fold)
         else:
-            out = torch.clone(x)
-            out[:, :-1, :] += x[:, 1:, :] * w1
+#            out = x[:, -1].clone()
+#            for i in range(n_segment):
+#                out[:,:, fold*i:fold*(i+1)] = x[:,i, :, fold*i:fold*(i+1)]
 
-            out = out[:,-1]
+#            out = torch.mean(x, 1)
 
-        return out.view(n_batch, c, hw)
+            _, out = rnn(x)
+        return out.view(n_batch, p, c)
 
 
 class InplaceShift(torch.autograd.Function):
@@ -100,11 +106,11 @@ class TemporalPool(nn.Module):
 def make_temporal_shift(net, n_segment, n_div=8):
     import torchvision
 
-    def make_block_temporal(stage):
-        stage = TemporalShift(stage, dim=768)
+    def make_block_temporal(stage, n_segment):
+        stage = TemporalShift(stage, n_segment = n_segment, dim=768)
         return stage
 
-    net.transformer.embeddings = make_block_temporal(net.transformer.embeddings)
+    net.transformer.embeddings = make_block_temporal(net.transformer.embeddings, n_segment)
 
 if __name__ == '__main__':
     # test inplace shift v.s. vanilla shift
