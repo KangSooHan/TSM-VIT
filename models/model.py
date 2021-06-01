@@ -367,6 +367,7 @@ class VisionTransformer(nn.Module):
         bn = []
         ln = []
         custom_ops = []
+        rnn_weight = []
 
         bn_cnt = 0
         for m in self.modules():
@@ -375,6 +376,10 @@ class VisionTransformer(nn.Module):
                 conv_weight.append(ps[0])
                 if len(ps) == 2:
                     conv_bias.append(ps[1])
+
+            elif isinstance(m, torch.nn.RNN):
+                ps = list(m.parameters())
+                rnn_weight.extend(list(m.parameters()))
 
             elif isinstance(m, torch.nn.Linear):
                 ps = list(m.parameters())
@@ -403,6 +408,8 @@ class VisionTransformer(nn.Module):
              'name': "first_conv_bias"},
             {'params': normal_weight, 'lr_mult': 1, 'decay_mult': 1,
              'name': "normal_weight"},
+            {'params': rnn_weight, 'lr_mult': 1, 'decay_mult': 1,
+             'name': "rnn_weight"},
             {'params': normal_bias, 'lr_mult': 2, 'decay_mult': 0,
              'name': "normal_bias"},
             {'params': bn, 'lr_mult': 1, 'decay_mult': 0,

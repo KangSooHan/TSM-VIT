@@ -17,7 +17,7 @@ class TemporalShift(nn.Module):
         self.fold_div = n_div
         self.inplace = inplace
         self.w1 = torch.nn.Parameter(torch.rand(1, 1,1, dim)*2-1)
-        self.rnn = torch.nn.RNN(dim, dim)
+        self.rnn = torch.nn.RNN(dim, dim, nonlinearity='relu')
         if inplace:
             print('=> Using in-place shift...')
         print('=> Using fold div: {}'.format(self.fold_div))
@@ -49,7 +49,13 @@ class TemporalShift(nn.Module):
 
 #            out = torch.mean(x, 1)
 
-            _, out = rnn(x)
+#            out = x.clone()
+#            out[:, 1:] = x[:, :-1] * rnn
+#            out = out[:, -1]
+            out, _ = rnn(x)
+            out = out.reshape(n_segment, -1, p, c)
+            out = out.permute(1, 0, 2, 3)
+            out = out[:, -1]
         return out.view(n_batch, p, c)
 
 
