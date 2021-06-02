@@ -58,9 +58,9 @@ def main():
     logging.info("Total Parameters: \t%2.1fM" % num_params)
     model = torch.nn.DataParallel(model).cuda()
 
-    optimizer = torch.optim.AdamW(policies,
+    optimizer = torch.optim.SGD(policies,
                         hp.lr,
-                        #momentum=hp.momentum,
+                        momentum=hp.momentum,
                         weight_decay=hp.weight_decay)
 
 

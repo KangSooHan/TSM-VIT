@@ -13,7 +13,7 @@ class Hparams:
     parser.add_argument('--img_size', type=int, default=224, help="Image Size")
 
 
-    parser.add_argument('--batch_size', type=int, default=32, help="Batch Size")
+    parser.add_argument('--batch_size', type=int, default=16, help="Batch Size")
     
     parser.add_argument('-j','--workers', type=int, default=32, help="number of data loading workers")
 
