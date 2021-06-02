@@ -9,6 +9,8 @@ from tqdm import tqdm
 
 import torch
 
+from torch.nn.utils import clip_grad_norm_
+
 from hparams import Hparams
 from utils import *
 from ops.data_load import return_dataset
@@ -47,7 +49,7 @@ def main():
     model.load_from(np.load(os.path.join(hp.pretrained_dir, hp.model_type+'.npz')))
 
     from ops.temporal_shift import make_temporal_shift
-    make_temporal_shift(model, hp.num_segments)
+    make_temporal_shift(model, hp.num_segments, hp.num_layers)
     print(model)
 
     policies = model.get_optim_policies()
@@ -127,7 +129,7 @@ def main():
         adjust_learning_rate(optimizer, epoch, hp.lr_type, hp.lr_steps)
 
         # train for one epoch
-        train(train_loader, model, emb, criterion, optimizer, epoch, tf_writer)
+        train(train_loader, model, criterion, optimizer, epoch, tf_writer)
 
         # evaluate on validation set
         if (epoch + 1) % hp.eval_freq == 0 or epoch == hp.epochs - 1:
@@ -168,7 +170,7 @@ def batched_index_select(input, dim, index):
     index = index.expand(expanse)
     return torch.gather(input, dim, index)
 
-def train(train_loader, model, emb, criterion, optimizer, epoch, tf_writer):
+def train(train_loader, model, criterion, optimizer, epoch, tf_writer):
     batch_time = AverageMeter()
     data_time = AverageMeter()
     losses = AverageMeter()
@@ -201,6 +203,7 @@ def train(train_loader, model, emb, criterion, optimizer, epoch, tf_writer):
 #
         # compute output
         output, _ = model(input_var)
+
         loss = criterion(output, target_var)
 
         # measure accuracy and record loss

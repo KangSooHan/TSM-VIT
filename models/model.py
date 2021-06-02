@@ -273,8 +273,8 @@ class VisionTransformer(nn.Module):
         x = x.view((-1, 3) + x.size()[-2:])
         x, attn_weights = self.transformer(x)
         #x = x.view((-1, self.num_segments) + x.size()[-2:])
-        #logits = self.head(x[:,-1, 0])
-        logits = self.head(x[:, 0])
+        logits = self.head(x[:, :self.num_segments])
+        logits = logits.mean(dim = 1)
 
         return logits, attn_weights
 

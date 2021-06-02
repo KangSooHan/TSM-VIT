@@ -53,6 +53,7 @@ class TemporalShift(nn.Module):
         self.n_segment = n_segment
         self.fold_div = n_div
         self.inplace = inplace
+        self.w1 = torch.nn.Parameter(torch.rand(1, 1, dim)*2-1)
         self.att = Attention(dim)
         self.att_norm = torch.nn.LayerNorm(dim)
         self.pool = pool
@@ -61,15 +62,15 @@ class TemporalShift(nn.Module):
         print('=> Using fold div: {}'.format(self.fold_div))
 
     def forward(self, x):
-        x = self.shift(x, self.n_segment, fold_div=self.fold_div, inplace=self.inplace, weight=(self.att, self.att_norm), pool=self.pool)
-        return self.net(x)
+        x = self.net(x)
+        x = self.shift(x, self.n_segment, fold_div=self.fold_div, inplace=self.inplace, weight=(self.att, self.att_norm, self.w1), pool=self.pool)
+        return x
 
     @staticmethod
     def shift(x, n_segment, fold_div=3, inplace=False, weight=None, pool=False):
-        att, att_norm = weight
+        att, att_norm, w1 = weight
         nt, p, c = x.size()
-        n_batch = nt // n_segment
-        x = x.view(n_batch, n_segment, p, c)
+        x = x.view(-1, n_segment, p, c)
 
         if inplace:
             # Due to some out of order error when performing parallel computing. 
@@ -80,7 +81,13 @@ class TemporalShift(nn.Module):
             out = x.clone()
 
             tokens = x[:, :, 0]
+
             h = tokens
+
+            past = tokens.clone()
+
+            tokens[:, 1:] += past[:, :-1] * w1
+
             tokens = att_norm(tokens)
             tokens, _ = att(tokens)
             tokens = tokens + h
@@ -88,123 +95,19 @@ class TemporalShift(nn.Module):
             out[:, :, 0] = tokens
 
         if pool:
-            out = out[:, -1]
+            return torch.cat((tokens, out[:, -1, 1:]), 1)
 
-        return out.view(-1, p, c)
-
-
-class InplaceShift(torch.autograd.Function):
-    # Special thanks to @raoyongming for the help to this function
-    @staticmethod
-    def forward(ctx, input, fold):
-        # not support higher order gradient
-        # input = input.detach_()
-        ctx.fold_ = fold
-        n, t, c, h, w = input.size()
-        buffer = input.data.new(n, t, fold, h, w).zero_()
-        buffer[:, :-1] = input.data[:, 1:, :fold]
-        input.data[:, :, :fold] = buffer
-        buffer.zero_()
-        buffer[:, 1:] = input.data[:, :-1, fold: 2 * fold]
-        input.data[:, :, fold: 2 * fold] = buffer
-        return input
-
-    @staticmethod
-    def backward(ctx, grad_output):
-        # grad_output = grad_output.detach_()
-        fold = ctx.fold_
-        n, t, c, h, w = grad_output.size()
-        buffer = grad_output.data.new(n, t, fold, h, w).zero_()
-        buffer[:, 1:] = grad_output.data[:, :-1, :fold]
-        grad_output.data[:, :, :fold] = buffer
-        buffer.zero_()
-        buffer[:, :-1] = grad_output.data[:, 1:, fold: 2 * fold]
-        grad_output.data[:, :, fold: 2 * fold] = buffer
-        return grad_output, None
+        else:
+            return out.view(-1, p, c)
 
 
-class TemporalPool(nn.Module):
-    def __init__(self, net, n_segment):
-        super(TemporalPool, self).__init__()
-        self.net = net
-        self.n_segment = n_segment
-
-    def forward(self, x):
-        x = self.temporal_pool(x, n_segment=self.n_segment)
-        return self.net(x)
-
-    @staticmethod
-    def temporal_pool(x, n_segment):
-        nt, c, h, w = x.size()
-        n_batch = nt // n_segment
-        x = x.view(n_batch, n_segment, c, h, w).transpose(1, 2)  # n, c, t, h, w
-        x = F.max_pool3d(x, kernel_size=(3, 1, 1), stride=(2, 1, 1), padding=(1, 0, 0))
-        x = x.transpose(1, 2).contiguous().view(nt // 2, c, h, w)
-        return x
-
-
-def make_temporal_shift(net, n_segment, n_div=8):
+def make_temporal_shift(net, n_segment, num_layers=6):
     def make_block_temporal(stage, n_segment, pool=False):
         stage.identity = TemporalShift(stage.identity, n_segment = n_segment, dim=768, pool=pool)
         return stage
 
-    for i, layer in enumerate(list(net.transformer.encoder.layer.children())):
-        if i<4:
-            layer = make_block_temporal(layer, n_segment)
-        elif i==4:
-            layer = make_block_temporal(layer, n_segment, pool=True)
-            break
-
-if __name__ == '__main__':
-    # test inplace shift v.s. vanilla shift
-    tsm1 = TemporalShift(nn.Sequential(), n_segment=8, n_div=8, inplace=False)
-    tsm2 = TemporalShift(nn.Sequential(), n_segment=8, n_div=8, inplace=True)
-
-    print('=> Testing CPU...')
-    # test forward
-    with torch.no_grad():
-        for i in range(10):
-            x = torch.rand(2 * 8, 3, 224, 224)
-            y1 = tsm1(x)
-            y2 = tsm2(x)
-            assert torch.norm(y1 - y2).item() < 1e-5
-
-    # test backward
-    with torch.enable_grad():
-        for i in range(10):
-            x1 = torch.rand(2 * 8, 3, 224, 224)
-            x1.requires_grad_()
-            x2 = x1.clone()
-            y1 = tsm1(x1)
-            y2 = tsm2(x2)
-            grad1 = torch.autograd.grad((y1 ** 2).mean(), [x1])[0]
-            grad2 = torch.autograd.grad((y2 ** 2).mean(), [x2])[0]
-            assert torch.norm(grad1 - grad2).item() < 1e-5
-
-    print('=> Testing GPU...')
-    tsm1.cuda()
-    tsm2.cuda()
-    # test forward
-    with torch.no_grad():
-        for i in range(10):
-            x = torch.rand(2 * 8, 3, 224, 224).cuda()
-            y1 = tsm1(x)
-            y2 = tsm2(x)
-            assert torch.norm(y1 - y2).item() < 1e-5
-
-    # test backward
-    with torch.enable_grad():
-        for i in range(10):
-            x1 = torch.rand(2 * 8, 3, 224, 224).cuda()
-            x1.requires_grad_()
-            x2 = x1.clone()
-            y1 = tsm1(x1)
-            y2 = tsm2(x2)
-            grad1 = torch.autograd.grad((y1 ** 2).mean(), [x1])[0]
-            grad2 = torch.autograd.grad((y2 ** 2).mean(), [x2])[0]
-            assert torch.norm(grad1 - grad2).item() < 1e-5
-    print('Test passed.')
-
-
-
-
+    layers = list(net.transformer.encoder.layer.children())
+    for i in range(num_layers):
+        layers[i] = make_block_temporal(layers[i], n_segment)
+        if i==(num_layers-1):
+            layers[i] = make_block_temporal(layers[i], n_segment, pool=True)
