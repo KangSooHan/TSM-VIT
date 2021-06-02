@@ -16,7 +16,7 @@ import numpy as np
 import torchvision
 from ops.transforms import *
 
-from torch.nn import CrossEntropyLoss, Dropout, Softmax, Linear, Conv2d, LayerNorm
+from torch.nn import CrossEntropyLoss, Dropout, Softmax, Linear, Conv2d, LayerNorm, Identity
 from torch.nn.modules.utils import _pair
 from scipy import ndimage
 
@@ -103,7 +103,6 @@ class Mlp(nn.Module):
         self.fc2 = Linear(config.transformer["mlp_dim"], config.hidden_size)
         self.act_fn = ACT2FN["gelu"]
         self.dropout = Dropout(config.transformer["dropout_rate"])
-
         self._init_weights()
 
     def _init_weights(self):
@@ -171,6 +170,7 @@ class Block(nn.Module):
         self.attention_norm = LayerNorm(config.hidden_size, eps=1e-6)
         self.ffn_norm = LayerNorm(config.hidden_size, eps=1e-6)
         self.ffn = Mlp(config)
+        self.identity = Identity()
         self.attn = Attention(config, vis)
 
     def forward(self, x):
@@ -179,6 +179,7 @@ class Block(nn.Module):
         x, weights = self.attn(x)
         x = x + h
 
+        x = self.identity(x)
         h = x
         x = self.ffn_norm(x)
         x = self.ffn(x)
@@ -250,8 +251,7 @@ class Transformer(nn.Module):
         self.encoder = Encoder(config, vis)
 
     def forward(self, input_ids):
-        with torch.no_grad():
-            embedding_output = self.embeddings(input_ids)
+        embedding_output = self.embeddings(input_ids)
         encoded, attn_weights = self.encoder(embedding_output)
         return encoded, attn_weights
 
@@ -268,13 +268,13 @@ class VisionTransformer(nn.Module):
 
         self.transformer = Transformer(config, img_size, vis)
         self.head = Linear(config.hidden_size, num_classes)
-        self.new_fc = Linear(config.hidden_size, num_classes)
-
 
     def forward(self, x, labels=None):
         x = x.view((-1, 3) + x.size()[-2:])
         x, attn_weights = self.transformer(x)
-        logits = self.new_fc(x[:, 0])
+        #x = x.view((-1, self.num_segments) + x.size()[-2:])
+        #logits = self.head(x[:,-1, 0])
+        logits = self.head(x[:, 0])
 
         return logits, attn_weights
 
@@ -356,6 +356,11 @@ class VisionTransformer(nn.Module):
         elif self.modality == 'RGBDiff':
             return torchvision.transforms.Compose([GroupMultiScaleCrop(self.img_size, [1, .875, .75]),
                                                    GroupRandomHorizontalFlip(is_flow=False)])
+
+
+            return torchvision.transforms.Compose([GroupMultiScaleCrop(self.img_size, [1, .875, .75]),
+                                                   GroupRandomHorizontalFlip(is_flow=False)])
+
 
     def get_optim_policies(self):
         conv_weight = []

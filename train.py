@@ -41,16 +41,16 @@ def main():
     model = VisionTransformer(config, hp.img_size, zero_head=True, num_classes=101, modality=hp.modality, num_segments=hp.num_segments)
 
     emb = model.transformer.embeddings
-
     scale_size = model.scale_size
     crop_size = model.crop_size
-    policies = model.get_optim_policies()
     train_augmentation = model.get_augmentation()
     model.load_from(np.load(os.path.join(hp.pretrained_dir, hp.model_type+'.npz')))
 
-
     from ops.temporal_shift import make_temporal_shift
     make_temporal_shift(model, hp.num_segments)
+    print(model)
+
+    policies = model.get_optim_policies()
 
     num_params = count_parameters(model)
     logging.info("{}".format(config))

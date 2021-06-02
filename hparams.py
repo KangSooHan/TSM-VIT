@@ -18,8 +18,8 @@ class Hparams:
     parser.add_argument('-j','--workers', type=int, default=32, help="number of data loading workers")
 
 
-    parser.add_argument('--lr', type=int, default=0.001, help="Learning Rate")
-    parser.add_argument('--momentum', type=int, default=0.9, help="Momentum")
+    parser.add_argument('--lr', type=float, default=0.001, help="Learning Rate")
+    parser.add_argument('--momentum', type=float, default=0.9, help="Momentum")
     parser.add_argument('--weight-decay', '-wd', type=float, default=5e-4, help='weight decay')
 
     parser.add_argument('--num_segments', type=int, default=6, help='number of segment')
